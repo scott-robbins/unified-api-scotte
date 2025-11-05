@@ -1,18 +1,88 @@
-// src/index.js (Modified for Unified API / Dynamic Routing)
+// src/index.ts (Final Code with Hardcoded IDs)
 
-// The model ID is no longer a Workers AI specific binding but a pointer to our Dynamic Route.
-// NOTE: These values must be defined in your wrangler.toml [vars] section.
-// (We assume they are available via env.DYNAMIC_ROUTE_NAME and env.AI_GATEWAY_URL)
-const SYSTEM_PROMPT = "You are a helpful, friendly assistant. Provide concise and accurate responses.";
+// --- 1. Define Environment Interface and Constants ---
+// NOTE: We are hardcoding the IDs and Route Name directly into the URL/payload
+// for simplicity, as requested, bypassing the 'env' injection for these values.
+interface Env {
+  ASSETS: { fetch: (request: Request) => Promise<Response> };
+  // CLOUDFLARE_AI_TOKEN?: string; // Optional token for authenticated Gateway
+}
 
-var index_default = {
-  /**
-   * Main request handler for the Worker
-   */
+interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+const SYSTEM_PROMPT: string = "You are a helpful, friendly assistant. Provide concise and accurate responses.";
+
+// HARDCODED VALUES:
+const ACCOUNT_ID: string = "3746ba19913534b7653b8af6a1299286";
+const GATEWAY_NAME: string = "unified-api-gw";
+const DYNAMIC_ROUTE_NAME: string = "hybrid_split"; 
+// The full Unified API URL structure:
+const GATEWAY_BASE_URL: string = `https://gateway.ai.cloudflare.com/v1/${ACCOUNT_ID}/${GATEWAY_NAME}/compat/chat/completions`;
+
+async function handleChatRequest(request: Request, env: Env): Promise<Response> {
+  const requestBody: { messages?: ChatMessage[] } = await request.json().catch(() => ({}));
+  let messages: ChatMessage[] = requestBody.messages || [];
+
+  if (!messages.some((msg) => msg.role === 'system')) {
+    messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
+  }
+  
+  // --- 2. CONSTRUCT THE UNIFIED PAYLOAD ---
+  const payload = {
+    // The 'model' field directs the request to your specific Dynamic Route configuration
+    "model": `dynamic/${DYNAMIC_ROUTE_NAME}`, 
+    "messages": messages,
+    "max_tokens": 1024,
+    "stream": true, 
+    
+    // Optional: Metadata for routing or logging 
+    "metadata": {
+        "source": "website_frontend",
+        "user_tier": "pro" 
+    }
+  };
+
+  // --- 3. EXECUTE THE FETCH CALL TO THE AI GATEWAY ---
+  try {
+    const aiResponse = await fetch(GATEWAY_BASE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // 'cf-aig-authorization': `Bearer ${env.CLOUDFLARE_AI_TOKEN}`, 
+      },
+      body: JSON.stringify(payload),
+    });
+
+    // --- 4. HANDLE ERRORS AND STREAM RESPONSE ---
+    if (!aiResponse.ok) {
+      const errorDetails = await aiResponse.text();
+      console.error('AI Gateway Error:', aiResponse.status, errorDetails);
+      return new Response(
+        JSON.stringify({ error: `AI service failed: ${aiResponse.statusText}. Check Gateway logs for details.` }),
+        { status: 500, headers: { "content-type": "application/json" } }
+      );
+    }
+    
+    // Return the response stream to the client
+    return aiResponse;
+
+  } catch (error) {
+    console.error("Worker Connection Error:", error);
+    return new Response(
+      JSON.stringify({ error: "Internal service error during connection." }),
+      { status: 500, headers: { "content-type": "application/json" } }
+    );
+  }
+}
+
+// --- 5. Main Worker Handler Export ---
+const worker: ExportedHandler<Env> = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // [ORIGINAL ROUTING LOGIC REMAINS]
     if (url.pathname === "/" || !url.pathname.startsWith("/api/")) {
       return env.ASSETS.fetch(request);
     }
@@ -28,71 +98,4 @@ var index_default = {
   }
 };
 
-async function handleChatRequest(request, env) {
-  // Ensure the request body is valid JSON and retrieve the messages array
-  const { messages = [] } = await request.json().catch(() => ({ messages: [] }));
-
-  if (!messages.some((msg) => msg.role === "system")) {
-    messages.unshift({ role: "system", content: SYSTEM_PROMPT });
-  }
-
-  // --- 1. CONSTRUCT THE UNIFIED GATEWAY URL ---
-  // We use the 'compat' endpoint for multi-provider Dynamic Routing.
-  // The full URL structure is: BASE_URL/v1/{account_id}/{gateway_id}/compat/chat/completions
-  const GATEWAY_BASE_URL = `https://gateway.ai.cloudflare.com/v1/3746ba19913534b7653b8af6a1299286/unified-api-gw/compat/chat/completions`;
-
-  // --- 2. CONSTRUCT THE UNIFIED PAYLOAD ---
-  const payload = {
-    // We send the Dynamic Route name in the 'model' field.
-    // The Gateway reads this name and executes the routing logic defined in the dashboard.
-    "model": `dynamic/hybrid_split`, 
-    "messages": messages,
-    "max_tokens": 1024,
-    "stream": true, // Enable streaming for better UX
-    
-    // Optional: Add custom metadata for routing/logging
-    "metadata": {
-        "source": "website_frontend",
-        "user_tier": "pro" 
-    }
-  };
-
-  // --- 3. EXECUTE THE FETCH CALL ---
-  try {
-    const aiResponse = await fetch(GATEWAY_BASE_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // If your Gateway requires a Cloudflare token (Authenticated Gateway), include it here
-        // 'cf-aig-authorization': `Bearer hXVRn5aqz6r_VvVGDCsf_pC7pLPSsSAN9r2eVyMt`, 
-      },
-      body: JSON.stringify(payload),
-    });
-
-    // --- 4. HANDLE ERRORS AND STREAM RESPONSE ---
-    if (!aiResponse.ok) {
-      // The AI Gateway/model returned a non-200 status
-      const errorDetails = await aiResponse.text();
-      console.error('AI Gateway Error:', errorDetails);
-      return new Response(
-        JSON.stringify({ error: "AI service failed: " + aiResponse.statusText }),
-        { status: 500, headers: { "content-type": "application/json" } }
-      );
-    }
-    
-    // Return the streaming response directly to the client
-    return aiResponse;
-
-  } catch (error) {
-    console.error("Error processing chat request:", error);
-    return new Response(
-      JSON.stringify({ error: "Failed to connect to Gateway." }),
-      { status: 500, headers: { "content-type": "application/json" } }
-    );
-  }
-}
-
-// Retain original exports for Worker environment
-export {
-  index_default as default
-};
+export default worker;
