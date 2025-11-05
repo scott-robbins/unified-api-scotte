@@ -1,11 +1,11 @@
-// src/index.ts (Final Code with Hardcoded IDs)
+// src/index.ts (Final Clean Code)
 
-// --- 1. Define Environment Interface and Constants ---
-// NOTE: We are hardcoding the IDs and Route Name directly into the URL/payload
-// for simplicity, as requested, bypassing the 'env' injection for these values.
+// Define the complete Env interface to include variables from wrangler.jsonc
 interface Env {
   ASSETS: { fetch: (request: Request) => Promise<Response> };
-  // CLOUDFLARE_AI_TOKEN?: string; // Optional token for authenticated Gateway
+  CLOUDFLARE_ACCOUNT_ID: string;
+  AI_GATEWAY_NAME: string;
+  DYNAMIC_ROUTE_NAME: string; 
 }
 
 interface ChatMessage {
@@ -15,13 +15,6 @@ interface ChatMessage {
 
 const SYSTEM_PROMPT: string = "You are a helpful, friendly assistant. Provide concise and accurate responses.";
 
-// HARDCODED VALUES:
-const ACCOUNT_ID: string = "3746ba19913534b7653b8af6a1299286";
-const GATEWAY_NAME: string = "unified-api-gw";
-const DYNAMIC_ROUTE_NAME: string = "hybrid_split"; 
-// The full Unified API URL structure:
-const GATEWAY_BASE_URL: string = `https://gateway.ai.cloudflare.com/v1/${ACCOUNT_ID}/${GATEWAY_NAME}/compat/chat/completions`;
-
 async function handleChatRequest(request: Request, env: Env): Promise<Response> {
   const requestBody: { messages?: ChatMessage[] } = await request.json().catch(() => ({}));
   let messages: ChatMessage[] = requestBody.messages || [];
@@ -30,43 +23,43 @@ async function handleChatRequest(request: Request, env: Env): Promise<Response> 
     messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
   }
   
-  // --- 2. CONSTRUCT THE UNIFIED PAYLOAD ---
+  // --- 1. CONSTRUCT THE UNIFIED GATEWAY URL using injected env variables ---
+  // THIS IS THE KEY FIX: It uses env variables to build the URL securely.
+  const GATEWAY_BASE_URL: string = `https://gateway.ai.cloudflare.com/v1/${env.CLOUDFLARE_ACCOUNT_ID}/${env.AI_GATEWAY_NAME}/compat/chat/completions`;
+
   const payload = {
-    // The 'model' field directs the request to your specific Dynamic Route configuration
-    "model": `dynamic/${DYNAMIC_ROUTE_NAME}`, 
+    "model": `dynamic/${env.DYNAMIC_ROUTE_NAME}`, 
     "messages": messages,
     "max_tokens": 1024,
     "stream": true, 
-    
-    // Optional: Metadata for routing or logging 
     "metadata": {
         "source": "website_frontend",
         "user_tier": "pro" 
     }
   };
 
-  // --- 3. EXECUTE THE FETCH CALL TO THE AI GATEWAY ---
+  // --- 2. EXECUTE THE FETCH CALL TO THE AI GATEWAY ---
   try {
     const aiResponse = await fetch(GATEWAY_BASE_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        // 'cf-aig-authorization': `Bearer ${env.CLOUDFLARE_AI_TOKEN}`, 
       },
       body: JSON.stringify(payload),
     });
 
-    // --- 4. HANDLE ERRORS AND STREAM RESPONSE ---
+    // --- 3. HANDLE ERRORS AND STREAM RESPONSE ---
     if (!aiResponse.ok) {
+      // Log the exact error response from the upstream model/gateway for debugging
       const errorDetails = await aiResponse.text();
       console.error('AI Gateway Error:', aiResponse.status, errorDetails);
+      // Return a generic 500 error to the client
       return new Response(
-        JSON.stringify({ error: `AI service failed: ${aiResponse.statusText}. Check Gateway logs for details.` }),
+        JSON.stringify({ error: `AI service failed. Check Gateway logs (Error: ${aiResponse.status})` }),
         { status: 500, headers: { "content-type": "application/json" } }
       );
     }
     
-    // Return the response stream to the client
     return aiResponse;
 
   } catch (error) {
@@ -78,7 +71,7 @@ async function handleChatRequest(request: Request, env: Env): Promise<Response> 
   }
 }
 
-// --- 5. Main Worker Handler Export ---
+// Main Worker Handler Export
 const worker: ExportedHandler<Env> = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
