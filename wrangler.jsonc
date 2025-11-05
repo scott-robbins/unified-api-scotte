@@ -1,12 +1,27 @@
-/**
- * For more details on how to configure Wrangler, refer to:
- * https://developers.cloudflare.com/workers/wrangler/configuration/
- */ {
+{
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "unified-api-scotte",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-10-08",
-	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+	"compatibility_flags": [
+		"nodejs_compat", 
+		"global_fetch_strictly_public"
+	],
+	
+	// --- Custom Variables for AI Gateway and Routing ---
+	"vars": {
+		// Your Cloudflare Account ID: Used to construct the full Gateway URL.
+		"CLOUDFLARE_ACCOUNT_ID": "3746ba19913534b7653b8af6a1299286",
+		
+		// Your AI Gateway Name (Used as the {gateway_id} in the URL).
+		"AI_GATEWAY_NAME": "unified-api-gw",
+		
+		// The name of the Dynamic Route you configured in the dashboard (e.g., 'hybrid_split').
+		// This tells the Gateway what routing logic to run.
+		"DYNAMIC_ROUTE_NAME": "hybrid_split" 
+	},
+	
+	// --- Existing Bindings ---
 	"assets": {
 		"binding": "ASSETS",
 		"directory": "./public"
