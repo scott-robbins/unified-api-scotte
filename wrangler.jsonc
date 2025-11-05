@@ -8,12 +8,18 @@
 		"global_fetch_strictly_public"
 	],
 	
+	// --- 1. ENVIRONMENT VARIABLES (Used to build the Gateway URL/Payload) ---
 	"vars": {
-		// Define the variables that will be securely injected into the Worker's 'env' object:
 		"CLOUDFLARE_ACCOUNT_ID": "3746ba19913534b7653b8af6a1299286",
 		"AI_GATEWAY_NAME": "unified-api-gw",
 		"DYNAMIC_ROUTE_NAME": "hybrid_split" 
 	},
+	
+	// --- 2. SECRETS (Required for OpenAI Authorization) ---
+	"secrets": [
+		// This variable holds your actual 'sk-' OpenAI key, set via `wrangler secret put`.
+		"OPENAI_API_KEY"
+	],
 	
 	"assets": {
 		"binding": "ASSETS",
